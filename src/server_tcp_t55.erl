@@ -18,7 +18,9 @@
 -record(state, {
 		  socket,
 		  imei,
-		  rmcre
+		  rmcre,
+		  ip,
+		  port
 		 }).
 
 %%%===================================================================
@@ -82,8 +84,7 @@ init([]) ->
      {ok, {IP, Port}} = inet:peername(Socket),
 	 lager:info("Accepted client ~p:~p",[IP, Port]),
 	 inet:setopts(Socket, [{active, once}, {packet, line}, binary]),
-%	 {ok, {IP, _Port}} = inet:peername(Socket),
-	 {next_state, 'WFDATA', State#state{socket=Socket}};
+	 {next_state, 'WFDATA', State#state{socket=Socket,ip=IP,port=Port}};
 
 'WFSOCKET'(_Event, State) ->
  	lager:info("Ev ~p",[_Event]),
@@ -134,6 +135,8 @@ init([]) ->
 											  {valid,case Valid of <<"A">> -> true; _ -> false end},
 											  {dt,UT},
 											  {st,MSec*1000000+SSec},
+											  {ip_addr,list_to_binary(inet:ntoa(State#state.ip))},
+											  {ip_port,State#state.port},
 											  {position,{array,[Lon, Lat]}}
 											 ]},
 								Document=iolist_to_binary(mochijson2:encode(Data)),
