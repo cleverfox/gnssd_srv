@@ -40,7 +40,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(P, M) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [P, M], []).
+    gen_server:start_link({local, M}, ?MODULE, [P, M], []).
 
 %%%===================================================================
 %%% gen_server callbacks

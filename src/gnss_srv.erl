@@ -59,35 +59,24 @@ init([]) ->
 	   { client_sup,
 		 { supervisor,
 		   start_link,
-		   [ {local, client_sup},
-			 ?MODULE,
-			 [server_tcp_tk103]
-		   ]
+		   [ {local, client_sup}, ?MODULE, [client_sup] ]
 		 },
 		 permanent, infinity, supervisor, []
 	   },
-	   {   server_tcp_listener,
+	   {   server_tcp_tk103,
 		   {server_tcp,start_link, [ 5002, server_tcp_tk103 ] },
+		   permanent, 2000, worker, []
+	   },
+	   {   server_tcp_t55,
+		   {server_tcp,start_link, [ 5005, server_tcp_t55 ] },
 		   permanent, 2000, worker, []
 	   }
 	  ]
 	 }
 	};
 
-init([Module]) ->
-    {ok,
-        {_SupFlags = {one_for_one, ?MAX_RESTART, ?MAX_TIME},
-		 [
-            %  % TCP Client
-            %  {   undefined,                               % Id       = internal id
-            %      {Module,start_link,[]},                  % StartFun = {M, F, A}
-            %      temporary,                               % Restart  = permanent | transient | temporary
-            %      2000,                                    % Shutdown = brutal_kill | int() >= 0 | infinity
-            %      worker,                                  % Type     = worker | supervisor
-            %      []                                       % Modules  = [Module] | dynamic
-            %  }
-            ]
-        }
-    }.
-
-
+init([client_sup]) -> %for client_sup init
+	{ok,
+	 {_SupFlags = {one_for_one, ?MAX_RESTART, ?MAX_TIME},
+	  [ ] }
+	}.
