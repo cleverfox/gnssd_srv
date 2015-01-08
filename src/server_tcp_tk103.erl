@@ -127,7 +127,7 @@ init([]) ->
 						Redis=fun(W) -> 
 									  eredis:q(W, [ "publish", "source", Document])
 							  end,
-						poolboy:transaction(redis,Redis),
+						poolboy:transaction(gs_redis,Redis),
 						ok;
 					_ -> ok
 				end 

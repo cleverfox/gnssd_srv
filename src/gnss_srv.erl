@@ -31,7 +31,7 @@ stop(_State) ->
 	ok.
 
 init([]) ->
-	{RedisHost,RedisPort} = case application:get_env(gnss_srv,redis) of 
+	{RedisHost,RedisPort} = case application:get_env(redis) of 
 					{ok, {RHost, RPort} } ->
 						{RHost,RPort};
 					_ ->
@@ -40,9 +40,9 @@ init([]) ->
 	{ok,
 	 {_SupFlags = {one_for_one, ?MAX_RESTART, ?MAX_TIME},
 	  [
-	   {   pool_redis,
+	   {   gs_pool_redis,
 		   {poolboy,start_link,[
-								[{name,{local,redis}},
+								[{name,{local,gs_redis}},
 								 {worker_module,eredis},
 								 {size,3},
 								 {max_overflow,20}
