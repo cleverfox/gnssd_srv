@@ -1,6 +1,6 @@
 {application, gnss_srv,
  [
-  {description, "GNSS daemon"},
+  {description, "GNSS TCP Servers"},
   {vsn, "1.0"},
   {id, "gnss_srv"},
   {modules,      [gnss_srv]},
