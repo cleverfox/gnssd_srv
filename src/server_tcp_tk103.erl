@@ -93,7 +93,7 @@ init([]) ->
 
 'WFDATA'({data, Bin}, State) ->
  	BData=State#state.recvbuf++binary_to_list(Bin),
- 	%lager:info("Data ~p",[BData]),
+ 	lager:info("Data ~p",[BData]),
 	{BD2, Arr} = parse_data(BData),
 	Fun=fun(X) -> 
 				case re:run(X,State#state.re,[{capture,all_names,binary}]) of 

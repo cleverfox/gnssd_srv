@@ -3,7 +3,7 @@
 -behaviour(gen_fsm).
 
 %% API functions
--export([start_link/0, assign_socket/2]).
+-export([start_link/0, assign_socket/2,binary_to_floatx/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -19,6 +19,7 @@
 		  socket,
 		  imei,
 		  rmcre,
+		  trcre,
 		  ip,
 		  port
 		 }).
@@ -63,7 +64,11 @@ assign_socket(Pid, Socket) when is_pid(Pid), is_port(Socket) ->
 init([]) ->
 	%lager:info("Spawn ~p",[?MODULE]),
 	{ok,MP} = re:compile("(?<A1>[01-9]{2})(?<A2>[01-9]{2})(?<A3>[01-9]{2})\.([^,]+),(?<B>.),(?<E1>[01-9]{2})(?<E2>[01-9]{2}\.[01-9]{4}),(?<E3>[NS]),(?<F1>[01-9]{3})(?<F2>[01-9]{2}\.[01-9]{4}),(?<F3>[WE]),(?<G>[01-9]+\.[01-9]+),(?<H>[01-9]+\.[01-9]+),(?<I1>[01-9]{2})(?<I2>[01-9]{2})(?<I3>[01-9]{2}),"),
-    {ok, 'WFSOCKET', #state{rmcre=MP}}.
+	{ok,RC} = re:compile("(?<A1>[01-9]{2})(?<A2>[01-9]{2})(?<A3>[01-9]{2})\.([^,]+),(?<B>.),(?<E1>[01-9]{2})(?<E2>[01-9]{2}\.[01-9]{4}),(?<E3>[NS]),(?<F1>[01-9]{3})(?<F2>[01-9]{2}\.[01-9]{4}),(?<F3>[WE]),(?<G>[01-9]+\.[01-9]+),(?<H>[01-9]+\.[01-9]+),(?<I1>[01-9]{2})(?<I2>[01-9]{2})(?<I3>[01-9]{2}),"),
+    {ok, 'WFSOCKET', #state{
+						rmcre=MP,
+						trcre=RC
+					   }}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -91,7 +96,7 @@ init([]) ->
     {next_state, 'WFDATA', State}.
 
 'WFDATA'({data, Bin}, State) ->
- %lager:info("Data ~p",[Bin]),
+% lager:info("Data ~p",[Bin]),
  State1=case Bin of 
 			<<"$PGID,",T/binary>> ->
 				TS=binary_to_list(T),
@@ -104,22 +109,75 @@ init([]) ->
 						lager:error("Bad IMEI ~p",[Bin]),
 						State
 				end;
+			<<"$TRCCR,",T/binary>> ->
+				lager:debug("TRCCR ~p",[T]),
+				case binary:split(T,[<<",">>],[global]) of
+					[<<Y:4/binary,M:2/binary,D:2/binary,Hr:2/binary,Min:2/binary,Sec:2/binary,".",_Msec/binary>>,Valid,BLat,BLon,BSp,BDir,X3,X4,_] ->
+						DT={{binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)}, 
+							{binary_to_integer(Hr), binary_to_integer(Min), binary_to_integer(Sec)}},
+
+						Lat=binary_to_floatx(BLat),
+						Lon=binary_to_floatx(BLon),
+						Alt=binary_to_floatx(X3),
+						Bat=binary_to_floatx(X4),
+						Speed=binary_to_floatx(BSp),
+						Dir=binary_to_floatx(BDir),
+						UT=case catch calendar:datetime_to_gregorian_seconds(DT) - 62167219200 of
+							   Time when is_integer(Time) -> Time;
+							   _ -> 0 
+						   end,
+						lager:info("Dev ~p @ ~p,~p ~p ~p ~p / ~p ~p",[binary_to_list(State#state.imei), Lon, Lat, binary_to_list(Valid), UT, Speed, X3, X4]),
+						case is_binary(State#state.imei) of
+							true ->
+								{MSec,SSec,_}=now(),		
+								Data={struct,[
+											  {imei,State#state.imei},
+											  {dir,Dir},
+											  {sp,Speed},
+											  {valid,case Valid of <<"A">> -> true; _ -> false end},
+											  {dt,UT},
+											  {st,MSec*1000000+SSec},
+											  {ip_addr,list_to_binary(inet:ntoa(State#state.ip))},
+											  {ip_port,State#state.port},
+											  {alt, Alt},
+											  {in0, Bat},
+											  {position,{array,[Lon, Lat]}}
+											 ]},
+								Document=iolist_to_binary(mochijson2:encode(Data)),
+								lager:debug("Send ~p",[Document]),
+								Redis=fun(W) -> 
+											  eredis:q(W, [ "publish", "source", Document])
+									  end,
+								poolboy:transaction(gs_redis,Redis),
+								State;
+							_ -> State
+						end;
+
+					_ ->
+						lager:info("invalid TRCCR ~p",[T])
+				end;
 			<<"$GPRMC,",T/binary>> ->
-				lager:info("gprmc ~p",[T]),
-				case re:run(T,State#state.rmcre,[{capture,all_names,binary}]) of 
-					{match, [Hr, Min, Sec, Valid, La1, La2, LaS, Lo1, Lo2, LoS, Spd, BDir, D, M, Y]} ->
-						DT={{2000+binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)}, 
+				lager:debug("GPRMC ~p",[T]),
+				%"185953.000,A,5143.9286          ,N,03607.4808          ,E,0.00,0.00,230315,,*06\r\n"
+				%"190154,    A,5143.92578400000019,N,03607.48517399999983,E,0.0 ,0.0 ,230315,,*18\r\n"
+				case binary:split(T,[<<",">>],[global]) of
+					[<<Hr:2/binary,Min:2/binary,Sec:2/binary,_MSec/binary>>,Valid,
+					 <<La1:2/binary,La2/binary>>,LaS,
+					 <<Lo1:3/binary,Lo2/binary>>,LoS,
+					 Spd,BDir,<<D:2/binary,M:2/binary,Y:2/binary>>,_,_] ->
+						DT={{binary_to_integer(Y)+2000, binary_to_integer(M), binary_to_integer(D)}, 
 							{binary_to_integer(Hr), binary_to_integer(Min), binary_to_integer(Sec)}},
 						Lat=case LaS of 
-								<<"S">> -> -(binary_to_integer(La1)+binary_to_float(La2)/60);
-								_ -> (binary_to_integer(La1)+binary_to_float(La2)/60)
+								<<"S">> -> -(binary_to_integer(La1)+binary_to_floatx(La2)/60);
+								_ -> (binary_to_integer(La1)+binary_to_floatx(La2)/60)
 							end,
 						Lon=case LoS of 
-								<<"W">> -> -(binary_to_integer(Lo1)+binary_to_float(Lo2)/60);
-								_ -> (binary_to_integer(Lo1)+binary_to_float(Lo2)/60)
+								<<"W">> -> -(binary_to_integer(Lo1)+binary_to_floatx(Lo2)/60);
+								_ -> (binary_to_integer(Lo1)+binary_to_floatx(Lo2)/60)
 							end,
-						Speed=binary_to_float(Spd),
-						Dir=binary_to_float(BDir),
+
+						Speed=binary_to_floatx(Spd),
+						Dir=binary_to_floatx(BDir),
 						UT=case catch calendar:datetime_to_gregorian_seconds(DT) - 62167219200 of
 							   Time when is_integer(Time) -> Time;
 							   _ -> 0 
@@ -148,9 +206,8 @@ init([]) ->
 								State;
 							_ -> State
 						end;
-					_Any -> 
-						lager:info("bad gprmc ~p",[_Any]),
-						State
+					_ ->
+						lager:info("invalid GPRMC ~p",[T])
 				end;
 			_ -> lager:info("unknown ~p",[Bin]),
 				 State
@@ -255,4 +312,11 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+binary_to_floatx(Bin) ->
+	try 
+		binary_to_float(Bin)
+	catch error:badarg ->
+		binary_to_integer(Bin)
+	end.
 
